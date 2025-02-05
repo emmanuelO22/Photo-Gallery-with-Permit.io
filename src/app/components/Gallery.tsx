@@ -1,0 +1,253 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { Lock, Share2, Grid, ImageIcon, BookOpen, Plus, Loader, UserPlus } from "lucide-react"
+import Image from "next/image"
+import FileUpload from "./ImageUpload"
+import { createClient } from "../../../utils/superbase/client"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+
+interface ImageType {
+  id: string
+  title: string
+  storage_path: string
+  visibility: 'public' | 'private' | 'shared'
+  user_id: string
+}
+
+interface LoadingState {
+  type: 'fetch' | 'move' | 'none'
+  imageId?: string
+}
+
+export default function Gallery() {
+  const [activeTab, setActiveTab] = useState<"public" | "private" | "shared">("public")
+  const [images, setImages] = useState<ImageType[]>([])
+  const [loadingState, setLoadingState] = useState<LoadingState>({ type: 'fetch' })
+  const supabase = createClient()
+
+  const fetchImages = async () => {
+    try {
+      setLoadingState({ type: 'fetch' })
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError) throw userError
+      
+      if (!user) {
+        setImages([])
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('gallery_images')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('visibility', activeTab)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setImages(data || [])
+      
+    } catch (error) {
+      console.error('Error fetching images:', error)
+    } finally {
+      setLoadingState({ type: 'none' })
+    }
+  }
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      fetchImages()
+    })
+
+    fetchImages()
+
+    return () => subscription.unsubscribe()
+  }, [activeTab])
+
+  const handleImageUploaded = async () => {
+    await fetchImages()
+  }
+
+  const updateVisibility = async (id: string, visibility: 'public' | 'private' | 'shared') => {
+    try {
+      setLoadingState({ type: 'move', imageId: id })
+
+      const { error } = await supabase
+        .from('gallery_images')
+        .update({ visibility })
+        .eq('id', id)
+
+      if (error) throw error
+
+      await fetchImages()
+    } catch (error) {
+      console.error('Error updating visibility:', error)
+    } finally {
+      setLoadingState({ type: 'none' })
+    }
+  }
+
+  const LoadingOverlay = () => (
+    <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-50">
+      <Loader className="w-6 h-6 text-white animate-spin" />
+    </div>
+  )
+
+  const TabLoadingOverlay = () => (
+    <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-40">
+      <div className="flex items-center space-x-2">
+        <Loader className="w-5 h-5 text-indigo-600 animate-spin" />
+        <span className="text-sm text-indigo-600 font-medium">Loading...</span>
+      </div>
+    </div>
+  )
+
+  const ShareFriendsButton = () => (
+    <div className="w-full max-w-2xl mx-auto mb-6">
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button 
+            variant="outline" 
+            className="w-full flex items-center justify-center space-x-2 py-6 border-2 border-dashed border-gray-300 hover:border-indigo-400 bg-white hover:bg-gray-50 transition-colors"
+          >
+            <UserPlus className="w-5 h-5 text-gray-500" />
+            <span className="text-gray-600 font-medium">Add Friend to Share With</span>
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Share with Friend</DialogTitle>
+            <DialogDescription>
+              Enter your friend's email to share selected images with them.
+            </DialogDescription>
+          </DialogHeader>
+          {/* Email input form will be added here later */}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+
+  return (
+    <div className="max-w-10xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="mb-8 flex justify-center items-center">
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={() => setActiveTab("public")}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${
+              activeTab === "public" ? "bg-indigo-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
+            }`}
+          >
+            <BookOpen size={18} />
+            <span>Public</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("private")}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${
+              activeTab === "private" ? "bg-indigo-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
+            }`}
+          >
+            <Lock size={18} />
+            <span>Private</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("shared")}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${
+              activeTab === "shared" ? "bg-indigo-600 text-white" : "bg-white text-gray-700 hover:bg-gray-100"
+            }`}
+          >
+            <Share2 size={18} />
+            <span>Shared</span>
+          </button>
+        </div>
+      </div>
+
+      {activeTab === "shared" && <ShareFriendsButton />}
+      
+      {activeTab === "public" && <FileUpload onImageUploaded={handleImageUploaded} />}
+
+      <div className="relative mt-8">
+        {loadingState.type === 'fetch' && <TabLoadingOverlay />}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          {images.map((img) => (
+            <div
+              key={img.id}
+              className="relative group aspect-square rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow duration-300"
+            >
+              {loadingState.type === 'move' && loadingState.imageId === img.id && <LoadingOverlay />}
+              <Image
+                src={supabase.storage.from('gallery').getPublicUrl(img.storage_path).data.publicUrl}
+                alt={img.title || `Image ${img.id}`}
+                fill
+                sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
+                className="object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end justify-between p-4">
+                <div className="text-white flex items-center space-x-2 text-sm">
+                  {img.visibility === 'private' ? (
+                    <Lock size={16} className="text-indigo-300" />
+                  ) : img.visibility === 'shared' ? (
+                    <Share2 size={16} className="text-green-300" />
+                  ) : (
+                    <BookOpen size={16} className="text-yellow-300" />
+                  )}
+                  <span className="capitalize">{img.visibility}</span>
+                </div>
+                {activeTab === "public" && (
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => updateVisibility(img.id, "private")}
+                      className="bg-white/30 hover:bg-white/50 text-white p-1 rounded"
+                      title="Make Private"
+                      disabled={loadingState.type === 'move'}
+                    >
+                      <Plus size={16} />
+                      <Lock size={16} className="hidden sm:inline-block ml-1" />
+                    </button>
+                    <button
+                      onClick={() => updateVisibility(img.id, "shared")}
+                      className="bg-white/30 hover:bg-white/50 text-white p-1 rounded"
+                      title="Make Shared"
+                      disabled={loadingState.type === 'move'}
+                    >
+                      <Plus size={16} />
+                      <Share2 size={16} className="hidden sm:inline-block ml-1" />
+                    </button>
+                  </div>
+                )}
+                {(activeTab === "private" || activeTab === "shared") && (
+                  <button
+                    onClick={() => updateVisibility(img.id, "public")}
+                    className="bg-white/30 hover:bg-white/50 text-white p-1 rounded"
+                    title="Make Public"
+                    disabled={loadingState.type === 'move'}
+                  >
+                    <BookOpen size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-8 flex justify-center space-x-4">
+        <button className="flex items-center space-x-2 px-6 py-3 bg-white text-gray-700 rounded-full text-sm font-medium shadow-md hover:shadow-lg transition-shadow duration-200">
+          <Grid size={18} />
+          <span>Grid View</span>
+        </button>
+        <button className="flex items-center space-x-2 px-6 py-3 bg-white text-gray-700 rounded-full text-sm font-medium shadow-md hover:shadow-lg transition-shadow duration-200">
+          <ImageIcon size={18} />
+          <span>Full Screen</span>
+        </button>
+      </div>
+    </div>
+  )
+}

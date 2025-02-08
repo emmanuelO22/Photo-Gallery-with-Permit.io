@@ -4,16 +4,9 @@ import { useState, useEffect } from "react"
 import { Lock, Share2, Grid, ImageIcon, BookOpen, Plus, Loader, UserPlus } from "lucide-react"
 import Image from "next/image"
 import FileUpload from "./ImageUpload"
+import { AddFriendModal } from "./AddFriendModal"
 import { createClient } from "../../../utils/superbase/client"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 
 interface ImageType {
   id: string
@@ -24,7 +17,7 @@ interface ImageType {
 }
 
 interface LoadingState {
-  type: 'fetch' | 'move' | 'none'
+  type: 'fetch' | 'move' | 'share' | 'none'
   imageId?: string
 }
 
@@ -32,6 +25,7 @@ export default function Gallery() {
   const [activeTab, setActiveTab] = useState<"public" | "private" | "shared">("public")
   const [images, setImages] = useState<ImageType[]>([])
   const [loadingState, setLoadingState] = useState<LoadingState>({ type: 'fetch' })
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false)
   const supabase = createClient()
 
   const fetchImages = async () => {
@@ -44,14 +38,47 @@ export default function Gallery() {
         setImages([])
         return
       }
-
-      const { data, error } = await supabase
+  
+      let query = supabase
         .from('gallery_images')
         .select('*')
-        .eq('user_id', user.id)
-        .eq('visibility', activeTab)
         .order('created_at', { ascending: false })
-
+  
+      if (activeTab === 'shared') {
+        // Get both images shared with you and images you've shared
+        const [sharedWithYou, sharedByYou] = await Promise.all([
+          // Images shared with you
+          supabase
+            .from('gallery_shares')
+            .select('owner_id')
+            .eq('shared_with_email', user.email),
+          // Images you've shared
+          supabase
+            .from('gallery_shares')
+            .select('owner_id')
+            .eq('owner_id', user.id)
+        ]);
+  
+        const ownerIds = [
+          ...(sharedWithYou.data?.map(share => share.owner_id) || []),
+          ...(sharedByYou.data?.map(share => share.owner_id) || []),
+          user.id // Include your own ID to see your shared images
+        ];
+  
+        // Remove duplicates from ownerIds
+        const uniqueOwnerIds = [...new Set(ownerIds)];
+        
+        query = query
+          .eq('visibility', 'shared')
+          .in('user_id', uniqueOwnerIds)
+      } else {
+        // Fetch user's own images
+        query = query
+          .eq('user_id', user.id)
+          .eq('visibility', activeTab)
+      }
+  
+      const { data, error } = await query
       if (error) throw error
       setImages(data || [])
       
@@ -59,6 +86,48 @@ export default function Gallery() {
       console.error('Error fetching images:', error)
     } finally {
       setLoadingState({ type: 'none' })
+    }
+  }
+
+  const handleShare = async (email: string) => {
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError) throw userError
+      if (!user) throw new Error('Not authenticated')
+
+      // Check if share already exists
+      const { data: existingShare } = await supabase
+        .from('gallery_shares')
+        .select()
+        .eq('owner_id', user.id)
+        .eq('shared_with_email', email)
+        .single()
+
+      if (!existingShare) {
+        // Create new share
+        const { error: shareError } = await supabase
+          .from('gallery_shares')
+          .insert({
+            owner_id: user.id,
+            shared_with_email: email
+          })
+
+        if (shareError) throw shareError
+
+        // Add viewer role
+        const { error: roleError } = await supabase
+          .from('gallery_roles')
+          .insert({
+            user_id: user.id,
+            shared_with_email: email,
+            role_type: 'viewer'
+          })
+
+        if (roleError) throw roleError
+      }
+    } catch (error) {
+      console.error('Error sharing:', error)
+      throw error
     }
   }
 
@@ -110,31 +179,6 @@ export default function Gallery() {
     </div>
   )
 
-  const ShareFriendsButton = () => (
-    <div className="w-full max-w-2xl mx-auto mb-6">
-      <Dialog>
-        <DialogTrigger asChild>
-          <Button 
-            variant="outline" 
-            className="w-full flex items-center justify-center space-x-2 py-6 border-2 border-dashed border-gray-300 hover:border-indigo-400 bg-white hover:bg-gray-50 transition-colors"
-          >
-            <UserPlus className="w-5 h-5 text-gray-500" />
-            <span className="text-gray-600 font-medium">Add Friend to Share With</span>
-          </Button>
-        </DialogTrigger>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Share with Friend</DialogTitle>
-            <DialogDescription>
-              Enter your friend's email to share selected images with them.
-            </DialogDescription>
-          </DialogHeader>
-          {/* Email input form will be added here later */}
-        </DialogContent>
-      </Dialog>
-    </div>
-  )
-
   return (
     <div className="max-w-10xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8 flex justify-center items-center">
@@ -169,9 +213,26 @@ export default function Gallery() {
         </div>
       </div>
 
-      {activeTab === "shared" && <ShareFriendsButton />}
+      {activeTab === "shared" && (
+        <div className="w-full max-w-2xl mx-auto mb-6">
+          <Button 
+            variant="outline" 
+            className="w-full flex items-center justify-center space-x-2 py-6 border-2 border-dashed border-gray-300 hover:border-indigo-400 bg-white hover:bg-gray-50 transition-colors"
+            onClick={() => setIsShareDialogOpen(true)}
+          >
+            <UserPlus className="w-5 h-5 text-gray-500" />
+            <span className="text-gray-600 font-medium">Add Friend to Share With</span>
+          </Button>
+        </div>
+      )}
       
       {activeTab === "public" && <FileUpload onImageUploaded={handleImageUploaded} />}
+
+      <AddFriendModal
+        isOpen={isShareDialogOpen}
+        onClose={() => setIsShareDialogOpen(false)}
+        onShareSubmit={handleShare}
+      />
 
       <div className="relative mt-8">
         {loadingState.type === 'fetch' && <TabLoadingOverlay />}

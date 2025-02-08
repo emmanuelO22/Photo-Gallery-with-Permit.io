@@ -3,7 +3,8 @@ import "./globals.css";
 import { logOut } from "../app/logout/actions";
 import { UserCircle } from "lucide-react";
 import PrivatePage from "./private/page";
-import { Toaster } from 'sonner'
+
+
 
 export const metadata: Metadata = {
   title: "Permit Photo Gallery",

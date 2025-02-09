@@ -7,6 +7,8 @@ import FileUpload from "./ImageUpload"
 import { AddFriendModal } from "./AddFriendModal"
 import { createClient } from "../../../utils/superbase/client"
 import { Button } from "@/components/ui/button"
+import { handleShare } from "./ShareHandler"
+import { checkGalleryPermissions } from "@/lib/permit"
 
 interface ImageType {
   id: string
@@ -21,12 +23,36 @@ interface LoadingState {
   imageId?: string
 }
 
+interface GalleryPermissions {
+  canView: boolean
+  canComment: boolean
+  canMove: boolean
+}
+
 export default function Gallery() {
   const [activeTab, setActiveTab] = useState<"public" | "private" | "shared">("public")
   const [images, setImages] = useState<ImageType[]>([])
   const [loadingState, setLoadingState] = useState<LoadingState>({ type: 'fetch' })
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false)
+  const [permissions, setPermissions] = useState<GalleryPermissions>({
+    canView: false,
+    canComment: false,
+    canMove: false
+  })
   const supabase = createClient()
+
+  const fetchPermissions = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const userPermissions = await checkGalleryPermissions(user.id)
+      console.log('Fetched permissions:', userPermissions)
+      setPermissions(userPermissions)
+    } catch (error) {
+      console.error('Error fetching permissions:', error)
+    }
+  }
 
   const fetchImages = async () => {
     try {
@@ -45,16 +71,13 @@ export default function Gallery() {
         .order('created_at', { ascending: false })
   
       if (activeTab === 'shared') {
-        // Get both images shared with you and images you've shared
         const [sharedWithYou, sharedByYou] = await Promise.all([
-          // Images shared with you
           supabase
-            .from('gallery_shares')
+            .from('gallery_shares_new')
             .select('owner_id')
             .eq('shared_with_email', user.email),
-          // Images you've shared
           supabase
-            .from('gallery_shares')
+            .from('gallery_shares_new')
             .select('owner_id')
             .eq('owner_id', user.id)
         ]);
@@ -62,17 +85,15 @@ export default function Gallery() {
         const ownerIds = [
           ...(sharedWithYou.data?.map(share => share.owner_id) || []),
           ...(sharedByYou.data?.map(share => share.owner_id) || []),
-          user.id // Include your own ID to see your shared images
+          user.id
         ];
   
-        // Remove duplicates from ownerIds
         const uniqueOwnerIds = [...new Set(ownerIds)];
         
         query = query
           .eq('visibility', 'shared')
           .in('user_id', uniqueOwnerIds)
       } else {
-        // Fetch user's own images
         query = query
           .eq('user_id', user.id)
           .eq('visibility', activeTab)
@@ -89,60 +110,19 @@ export default function Gallery() {
     }
   }
 
-  const handleShare = async (email: string) => {
+  const handleShareSubmit = async (email: string, role: 'viewer' | 'curator') => {
     try {
-      const { data: { user }, error: userError } = await supabase.auth.getUser()
-      if (userError) throw userError
-      if (!user) throw new Error('Not authenticated')
-
-      // Check if share already exists
-      const { data: existingShare } = await supabase
-        .from('gallery_shares')
-        .select()
-        .eq('owner_id', user.id)
-        .eq('shared_with_email', email)
-        .single()
-
-      if (!existingShare) {
-        // Create new share
-        const { error: shareError } = await supabase
-          .from('gallery_shares')
-          .insert({
-            owner_id: user.id,
-            shared_with_email: email
-          })
-
-        if (shareError) throw shareError
-
-        // Add viewer role
-        const { error: roleError } = await supabase
-          .from('gallery_roles')
-          .insert({
-            user_id: user.id,
-            shared_with_email: email,
-            role_type: 'viewer'
-          })
-
-        if (roleError) throw roleError
-      }
+      setLoadingState({ type: 'share' });
+      console.log('Starting share process:', { email, role });
+      await handleShare(email, role);
+      console.log('Share process completed');
+      await fetchImages();
     } catch (error) {
-      console.error('Error sharing:', error)
-      throw error
+      console.error('Error in handleShareSubmit:', error);
+      throw error;
+    } finally {
+      setLoadingState({ type: 'none' });
     }
-  }
-
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      fetchImages()
-    })
-
-    fetchImages()
-
-    return () => subscription.unsubscribe()
-  }, [activeTab])
-
-  const handleImageUploaded = async () => {
-    await fetchImages()
   }
 
   const updateVisibility = async (id: string, visibility: 'public' | 'private' | 'shared') => {
@@ -163,6 +143,18 @@ export default function Gallery() {
       setLoadingState({ type: 'none' })
     }
   }
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      fetchImages()
+      fetchPermissions()
+    })
+
+    fetchImages()
+    fetchPermissions()
+
+    return () => subscription.unsubscribe()
+  }, [activeTab])
 
   const LoadingOverlay = () => (
     <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-50">
@@ -226,12 +218,12 @@ export default function Gallery() {
         </div>
       )}
       
-      {activeTab === "public" && <FileUpload onImageUploaded={handleImageUploaded} />}
+      {activeTab === "public" && <FileUpload onImageUploaded={fetchImages} />}
 
       <AddFriendModal
         isOpen={isShareDialogOpen}
         onClose={() => setIsShareDialogOpen(false)}
-        onShareSubmit={handleShare}
+        onShareSubmit={handleShareSubmit}
       />
 
       <div className="relative mt-8">

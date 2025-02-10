@@ -57,43 +57,27 @@ export const verifyUserExists = async (userId: string): Promise<boolean> => {
 };
 
 // Enhanced permission check with retries
-const check = unstable_cache(
-  async (action: Actions, resource: Resources, userId: string) => {
-    const requestId = logPermitAction("Checking permission", {
-      userId,
-      action,
-      resource,
-    });
-
-    try {
-      // Verify user exists before checking permissions
-      const userExists = await verifyUserExists(userId);
-      if (!userExists) {
-        console.warn(
-          `[Permit.io] (${requestId}) User ${userId} not found in Permit.io`
-        );
-        return false;
-      }
-
-      const permitted = await permit.check(userId, action, resource);
-      logPermitAction(`Permission result (${requestId})`, {
+const check = async (action: Actions, resource: Resources, userId: string) => {
+  try {
+    const response = await fetch('/api/permit/check', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
         userId,
         action,
-        resource,
-        permitted,
-      });
-      return permitted;
-    } catch (error) {
-      console.error(
-        `[Permit.io] (${requestId}) Permission check failed:`,
-        error
-      );
-      return false;
-    }
-  },
-  ["permitKey"],
-  { revalidate: TEN_MINUTES }
-);
+        resource
+      })
+    });
+
+    const data = await response.json();
+    return data.permitted;
+  } catch (error) {
+    console.error('Permission check failed:', error);
+    return false;
+  }
+};
 
 // Enhanced permission checking function
 export const checkPermission = async (action: Actions, resource: Resources) => {
@@ -109,6 +93,13 @@ export const checkPermission = async (action: Actions, resource: Resources) => {
       error,
     } = await supabase.auth.getUser();
 
+    console.log('Checking permissions for user:', user);
+  
+    const canMove = await permit.check('','move', 'gallery');
+    console.log('Move permission result:', {
+      user,
+      canMove,
+    });
     if (error) {
       throw new Error(`Auth error: ${error.message}`);
     }

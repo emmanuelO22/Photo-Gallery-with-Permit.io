@@ -44,17 +44,17 @@ export async function POST(request: Request) {
     });
     console.log('[Permit.io] Sync result:', syncResult);
 
-    // unassign user former roles
-    console.log('[Permit.io] Unassigning former roles:', {
-      userId: user.id,
-      tenant: "default"
-    });
-    const unassignResult = await permit.api.unassignRole({
-      user: user.id,
-      tenant: "default",
-      role: "admin"
-    });
-    console.log('[Permit.io] Unassign result:', unassignResult);
+    // // unassign user former roles
+    // console.log('[Permit.io] Unassigning former roles:', {
+    //   userId: user.id,
+    //   tenant: "default"
+    // });
+    // const unassignResult = await permit.api.unassignRole({
+    //   user: user.id,
+    //   tenant: "default",
+    //   role: "admin"
+    // });
+    // console.log('[Permit.io] Unassign result:', unassignResult);
 
     // Assign role
     console.log('[Permit.io] Assigning role:', {

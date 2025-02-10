@@ -4,7 +4,8 @@ import { syncUserToPermit } from "@/lib/permit";
 
 export const handleShare = async (
   email: string,
-  role: "viewer" | "curator"
+  role: "viewer" | "curator",
+  
 ) => {
   const supabase = createClient();
 

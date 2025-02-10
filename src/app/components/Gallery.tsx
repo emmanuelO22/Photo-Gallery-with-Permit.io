@@ -274,31 +274,48 @@ export default function Gallery() {
               {/* Download button overlay */}
 
               {/* why cant i see this button */}
-              {activeTab === "shared" && permissions.canMove && (
+              {activeTab === "shared" && ( 
                 <div className="absolute top-2 right-2 z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                   <button
-                    onClick={() => {
+                    onClick={async () => {
+                      if (!permissions.canMove) {
+                        // Show not permitted notification for viewers
+                        alert(
+                          "You don't have permission to download images. Only curators can download images."
+                        );
+                        return;
+                      }
+
+                      // Download logic only runs if user has canMove permission
                       const publicUrl = supabase.storage
                         .from("gallery")
                         .getPublicUrl(img.storage_path).data.publicUrl;
-                      fetch(publicUrl)
-                        .then((response) => response.blob())
-                        .then((blob) => {
-                          const url = window.URL.createObjectURL(blob);
-                          const a = document.createElement("a");
-                          a.href = url;
-                          a.download = img.title || `image-${img.id}`;
-                          document.body.appendChild(a);
-                          a.click();
-                          window.URL.revokeObjectURL(url);
-                          document.body.removeChild(a);
-                        })
-                        .catch((error) =>
-                          console.error("Error downloading image:", error)
-                        );
+                      try {
+                        const response = await fetch(publicUrl);
+                        const blob = await response.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = img.title || `image-${img.id}`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                      } catch (error) {
+                        console.error("Error downloading image:", error);
+                        alert("Failed to download image");
+                      }
                     }}
-                    className="bg-white/80 hover:bg-white text-black p-2 rounded-full shadow-lg"
-                    title="Download Image"
+                    className={`${
+                      permissions.canMove
+                        ? "bg-white/80 hover:bg-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                    } text-black p-2 rounded-full shadow-lg`}
+                    title={
+                      permissions.canMove
+                        ? "Download Image"
+                        : "Requires curator permission to download"
+                    }
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"

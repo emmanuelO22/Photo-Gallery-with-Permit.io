@@ -18,7 +18,7 @@ const initPermit = () => {
 };
 
 const permit = initPermit();
-const TEN_MINUTES = 60 * 10;
+
 
 export type Actions =
   | "create"

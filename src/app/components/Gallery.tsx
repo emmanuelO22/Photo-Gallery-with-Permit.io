@@ -10,6 +10,8 @@ import {
   Plus,
   Loader,
   UserPlus,
+  Trash2,
+  MessageSquare,
 } from "lucide-react";
 import Image from "next/image";
 import FileUpload from "./ImageUpload";
@@ -18,6 +20,7 @@ import { createClient } from "../../../utils/superbase/client";
 import { Button } from "@/components/ui/button";
 import { handleShare } from "./ShareHandler";
 import { checkGalleryPermissions } from "@/lib/permit";
+import { CommentModal } from "./CommentModal";
 
 interface ImageType {
   id: string;
@@ -28,7 +31,7 @@ interface ImageType {
 }
 
 interface LoadingState {
-  type: "fetch" | "move" | "share" | "none";
+  type: "fetch" | "move" | "share" | "delete" | "none";
   imageId?: string;
 }
 
@@ -36,6 +39,8 @@ interface GalleryPermissions {
   canView: boolean;
   canComment: boolean;
   canMove: boolean;
+  canDelete: boolean;
+  canDownload: boolean;
 }
 
 export default function Gallery() {
@@ -51,7 +56,11 @@ export default function Gallery() {
     canView: false,
     canComment: false,
     canMove: false,
+    canDelete: false,
+    canDownload: false,
   });
+  const [isCommentModalOpen, setIsCommentModalOpen] = useState(false);
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
 
   const supabase = createClient();
 
@@ -71,6 +80,20 @@ export default function Gallery() {
     } catch (error) {
       console.error("Error fetching permissions:", error);
     }
+  };
+
+  // Add this helper function to determine role based on permissions
+  const getUserRole = (permissions: GalleryPermissions) => {
+    if (
+      permissions.canMove &&
+      permissions.canDelete &&
+      permissions.canDownload
+    ) {
+      return "Admin";
+    } else if (permissions.canComment && permissions.canDownload) {
+      return "Curator";
+    }
+    return "Viewer";
   };
 
   const fetchImages = async () => {
@@ -163,6 +186,44 @@ export default function Gallery() {
       await fetchImages();
     } catch (error) {
       console.error("Error updating visibility:", error);
+    } finally {
+      setLoadingState({ type: "none" });
+    }
+  };
+
+  //handle delete function
+  const handleDeleteImage = async (imageId: string) => {
+    try {
+      setLoadingState({ type: "delete", imageId });
+
+      // First, delete all comments associated with the image
+      const { error: commentsError } = await supabase
+        .from("image_comments_new")
+        .delete()
+        .eq("image_id", imageId);
+
+      if (commentsError) throw commentsError;
+
+      // Then delete the image record
+      const { error: imageError } = await supabase
+        .from("gallery_images_new")
+        .delete()
+        .eq("id", imageId);
+
+      if (imageError) throw imageError;
+
+      // Delete the actual image file from storage
+      const { error: storageError } = await supabase.storage
+        .from("gallery")
+        .remove([`${imageId}`]);
+
+      if (storageError) throw storageError;
+
+      // Refresh images after successful deletion
+      await fetchImages();
+    } catch (error) {
+      console.error("Error deleting image:", error);
+      alert("Failed to delete image");
     } finally {
       setLoadingState({ type: "none" });
     }
@@ -273,12 +334,11 @@ export default function Gallery() {
 
               {/* Download button overlay */}
 
-              {/* why cant i see this button */}
-              {activeTab === "shared" && ( 
+              {activeTab === "shared" && (
                 <div className="absolute top-2 right-2 z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                   <button
                     onClick={async () => {
-                      if (!permissions.canMove) {
+                      if (!permissions.canDownload) {
                         // Show not permitted notification for viewers
                         alert(
                           "You don't have permission to download images. Only curators can download images."
@@ -307,12 +367,12 @@ export default function Gallery() {
                       }
                     }}
                     className={`${
-                      permissions.canMove
+                      permissions.canDownload
                         ? "bg-white/80 hover:bg-white"
                         : "bg-gray-200 hover:bg-gray-300"
                     } text-black p-2 rounded-full shadow-lg`}
                     title={
-                      permissions.canMove
+                      permissions.canDownload
                         ? "Download Image"
                         : "Requires curator permission to download"
                     }
@@ -386,7 +446,7 @@ export default function Gallery() {
                   </div>
                 )}
 
-                {(activeTab === "private" || activeTab === "shared") && (
+                {activeTab === "private" && (
                   <button
                     onClick={() => updateVisibility(img.id, "public")}
                     className="bg-white/30 hover:bg-white/50 text-white p-1 rounded"
@@ -395,6 +455,75 @@ export default function Gallery() {
                   >
                     <BookOpen size={16} />
                   </button>
+                )}
+
+                {activeTab === "shared" && (
+                  <div className="flex space-x-2">
+                    <span
+                      className={`px-2 py-1 text-xs font-medium ${
+                        getUserRole(permissions) === "Admin"
+                          ? " text-red-800"
+                          : getUserRole(permissions) === "Curator"
+                          ? " text-purple-800"
+                          : " text-blue-800"
+                      }`}
+                    >
+                      {getUserRole(permissions)}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setSelectedImageId(img.id);
+                        setIsCommentModalOpen(true);
+                      }}
+                      className="bg-white/30 hover:bg-white/50 text-white p-1 rounded"
+                      title="View Comments"
+                    >
+                      <MessageSquare size={16} />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        if (!permissions.canDelete) {
+                          alert("You don't have permission to delete images");
+                          return;
+                        }
+                        handleDeleteImage(img.id);
+                      }}
+                      className={`bg-white/30 hover:bg-white/50 text-white p-1 rounded ${
+                        !permissions.canDelete ? "opacity-50" : ""
+                      }`}
+                      title={
+                        permissions.canDelete
+                          ? "Delete Image"
+                          : "Requires delete permission"
+                      }
+                      disabled={loadingState.type === "delete"}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!permissions.canMove) {
+                          alert(
+                            "You don't have permission to make images public"
+                          );
+                          return;
+                        }
+                        updateVisibility(img.id, "public");
+                      }}
+                      className={`bg-white/30 hover:bg-white/50 text-white p-1 rounded ${
+                        !permissions.canMove ? "opacity-50" : ""
+                      }`}
+                      title={
+                        permissions.canMove
+                          ? "Make Public"
+                          : "Requires move permission"
+                      }
+                      disabled={loadingState.type === "move"}
+                    >
+                      <BookOpen size={16} />
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -412,6 +541,17 @@ export default function Gallery() {
           <span>Full Screen</span>
         </button>
       </div>
+
+      {/* Add the CommentModal RIGHT HERE, before the final closing div */}
+      <CommentModal
+        isOpen={isCommentModalOpen}
+        onClose={() => {
+          setIsCommentModalOpen(false);
+          setSelectedImageId(null);
+        }}
+        imageId={selectedImageId || ""}
+        canComment={permissions.canComment}
+      />
     </div>
   );
 }

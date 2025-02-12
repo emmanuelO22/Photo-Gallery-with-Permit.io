@@ -1,6 +1,5 @@
 // lib/permit.ts
 import { Permit } from "permitio";
-import { unstable_cache } from "next/cache";
 import { createClient } from "../../utils/superbase/client";
 
 // Initialize Permit with proper error handling
@@ -27,12 +26,13 @@ export type Actions =
   | "delete"
   | "view"
   | "comment"
-  | "move";
+  | "move"
+  | "download"
+  ;
 export type Resources =
   | "PublicImages"
   | "PrivateImages"
   | "SharedImages"
-  | "Comments";
 export type UserRole = "admin" | "viewer" | "curator";
 
 // Enhanced logging with timestamps
@@ -125,16 +125,20 @@ export const checkGalleryPermissions = async (userId: string) => {
   const requestId = logPermitAction("Checking gallery permissions", { userId });
 
   try {
-    const [canView, canComment, canMove] = await Promise.all([
+    const [canView, canComment, canMove, canDelete, canDownload ] = await Promise.all([
       check("view", "SharedImages", userId),
       check("comment", "SharedImages", userId),
       check("move", "SharedImages", userId),
+      check("delete", "SharedImages", userId),
+      check("download", "SharedImages", userId),
     ]);
 
     const permissions = {
       canView,
       canComment,
       canMove,
+      canDelete,
+      canDownload,
     };
 
     logPermitAction(`Gallery permissions result (${requestId})`, {
@@ -151,6 +155,8 @@ export const checkGalleryPermissions = async (userId: string) => {
       canView: false,
       canComment: false,
       canMove: false,
+      canDelete: false,
+      canDownload: false,
     };
   }
 };
@@ -189,144 +195,7 @@ export const syncUserToPermit = async (
   }
 };
 
-// export const syncUserToPermit = async (
-//   user: { id: string; email: string },
-//   role: UserRole = "admin"
-// ) => {
-//   const requestId = logPermitAction("Starting user sync", { userId: user.id, email: user.email, role });
-
-//   try {
-//     // First try to get the user to see if they exist
-//     let userExists = false;
-//     try {
-//       await permit.api.getUser(user.id);
-//       userExists = true;
-//     } catch (error) {
-//       console.log(`[Permit.io] (${requestId}) User not found, will create new user`);
-//     }
-
-//     // Sync user details
-//     await permit.api.syncUser({
-//       key: user.id,
-//       email: user.email,
-//       first_name: user.email.split('@')[0],
-//       attributes: {
-//         provider: "supabase",
-//         email_verified: true,
-//         last_sync: new Date().toISOString()
-//       }
-//     });
-
-//     // Assign role - Permit.io will handle replacing existing roles
-//     await permit.api.assignRole({
-//       role,
-//       tenant: "default",
-//       user: user.id
-//     });
-
-//     logPermitAction(`User sync completed (${requestId})`, {
-//       userId: user.id,
-//       role,
-//       userExists
-//     });
-
-//     return true;
-//   } catch (error) {
-//     console.error(`[Permit.io] (${requestId}) User sync failed:`, error);
-//     return false;
-//   }
-// };
-
 export default permit;
 
-// import { Permit } from "permitio";
-// import { unstable_cache } from "next/cache";
-// import { createClient } from "../../utils/superbase/client";
 
-// const permit = new Permit({
-//     pdp: "https://cloudpdp.api.permit.io",
-//     token: "permit_key_ODvwfdICXFHxDR4AePTKidDmMGM3WyI8z03Srps86hL5WBYe9si0aPLZrZCYlakpm0Rav1XVF0ab7jw9uqzah9",
-// });
 
-// const TEN_MINUTES = 60 * 10;
-
-// export type Actions = "create" | "read" | "update" | "delete";
-// export type Resources = "PublicImages" | "PrivateImages" | "SharedImages";
-
-// // Enhanced logging for debugging
-// const logPermitAction = (action: string, details: any) => {
-//     console.log(`[Permit.io] ${action}:`, JSON.stringify(details, null, 2));
-// };
-
-// // Cache permission checks with better error handling
-// const check = unstable_cache(
-//     async (action: Actions, resource: Resources, userId: string) => {
-//         try {
-//             logPermitAction("Checking permission", { userId, action, resource });
-//             const permitted = await permit.check(userId, action, resource);
-//             logPermitAction("Permission result", { userId, action, resource, permitted });
-//             return permitted;
-//         } catch (error) {
-//             console.error("[Permit.io] Permission check failed:", error);
-//             return false;
-//         }
-//     },
-//     ["permitKey"],
-//     { revalidate: TEN_MINUTES }
-// );
-
-// // Enhanced permission checking function
-// export const checkPermission = async (action: Actions, resource: Resources) => {
-//     try {
-//         const supabase = createClient();
-//         const { data: { user }, error } = await supabase.auth.getUser();
-
-//         if (error) {
-//             throw new Error(`Auth error: ${error.message}`);
-//         }
-
-//         if (!user) {
-//             throw new Error("No user found");
-//         }
-
-//         logPermitAction("User context", { userId: user.id, email: user.email });
-//         const hasPermission = await check(action, resource, user.id);
-//         return hasPermission;
-//     } catch (error) {
-//         console.error("[Permit.io] Permission check failed:", error);
-//         return false;
-//     }
-// };
-
-// // Sync user with Permit.io
-// export const syncUserToPermit = async (user: { id: string; email: string }) => {
-//     try {
-//         logPermitAction("Syncing user", { userId: user.id, email: user.email });
-
-//         // Create/update user in Permit.io
-//         await permit.api.syncUser({
-//             key: user.id,
-//             email: user.email,
-//             first_name: user.email.split('@')[0], // Basic first name from email
-//             attributes: {
-//                 provider: "supabase",
-//                 email_verified: true
-//             }
-//         });
-
-//         // Assign default role
-//         await permit.api.assignRole({
-//             role: "admin", // You might want to adjust this based on your needs
-//             tenant: "default",
-//             user: user.id
-//         });
-
-//         logPermitAction("User sync completed", { userId: user.id });
-//         return true;
-//     } catch (error) {
-//         console.error("[Permit.io] User sync failed:", error);
-//         return false;
-//     }
-// };
-
-// export default permit;

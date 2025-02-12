@@ -8,7 +8,7 @@ const initPermit = () => {
     return new Permit({
       pdp: "https://cloudpdp.api.permit.io",
       token:
-        "permit_key_ODvwfdICXFHxDR4AePTKidDmMGM3WyI8z03Srps86hL5WBYe9si0aPLZrZCYlakpm0Rav1XVF0ab7jw9uqzah9",
+      process.env.NEXT_PUBLIC_PERMIT_KEY,
     });
   } catch (error) {
     console.error("[Permit.io] Failed to initialize:", error);
